@@ -13,12 +13,12 @@ import java.sql.*;
 public class MigrationService {
 
     private final String CLICKHOUSE_URL = "jdbc:clickhouse://84.252.133.205:8123/dwh?compress=0";
-    private final String CLICKHOUSE_USER = "default";
-    private final String CLICKHOUSE_PASSWORD = "default";
+    private final String CLICKHOUSE_USER = "";
+    private final String CLICKHOUSE_PASSWORD = "";
 
     private final String POSTGRES_URL = "jdbc:postgresql://localhost:5432/postgres?currentSchema=estate";
-    private final String POSTGRES_USER = "postgres";
-    private final String POSTGRES_PASSWORD = "admin";
+    private final String POSTGRES_USER = "";
+    private final String POSTGRES_PASSWORD = "";
 
     private final String CLICKHOUSE_TABLE = "dwh.v_listings_actual_new_c";
 
