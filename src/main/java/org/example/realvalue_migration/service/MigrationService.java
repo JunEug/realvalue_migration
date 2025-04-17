@@ -4,130 +4,134 @@ import org.postgresql.copy.CopyManager;
 import org.postgresql.core.BaseConnection;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
+import java.sql.*;
 
 @Service
 public class MigrationService {
 
-    private final String CLICKHOUSE_URL = "";
-    private final String CLICKHOUSE_USER = "default";
-    private final String CLICKHOUSE_PASSWORD = "default";
+    private final String CLICKHOUSE_URL = "jdbc:clickhouse://84.252.133.205:8123/dwh?compress=0";
+    private final String CLICKHOUSE_USER = "";
+    private final String CLICKHOUSE_PASSWORD = "";
 
-    private final String POSTGRES_URL = "";
-    private final String POSTGRES_USER = "postgres";
-    private final String POSTGRES_PASSWORD = "admin";
+    private final String POSTGRES_URL = "jdbc:postgresql://localhost:5432/postgres?currentSchema=estate";
+    private final String POSTGRES_USER = "";
+    private final String POSTGRES_PASSWORD = "";
+
+    private final String CLICKHOUSE_TABLE = "dwh.v_listings_actual_new_c";
 
     public void migrateData(int batchSize) throws Exception {
-
         String tempDir = System.getProperty("java.io.tmpdir");
-        String csvFilePath = tempDir + "data.csv";
-
-
+        String csvFilePath = tempDir + "/data.csv";
         Files.createDirectories(Paths.get(tempDir));
 
         try (
                 Connection clickhouseConn = DriverManager.getConnection(CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD);
                 BufferedWriter csvWriter = new BufferedWriter(new FileWriter(csvFilePath))
         ) {
-            System.out.println("Connections to ClickHouse established successfully.");
+            System.out.println("Connection to ClickHouse established successfully.");
+            verifyTableStructure(clickhouseConn);
 
-
-            String queryTemplate = "SELECT * FROM listings LIMIT %d OFFSET %d";
+            String queryTemplate = "SELECT * FROM " + CLICKHOUSE_TABLE + " LIMIT %d OFFSET %d";
             int offset = 0;
+            int totalRecords = 0;
 
             while (true) {
                 String query = String.format(queryTemplate, batchSize, offset);
-                ResultSet rs = clickhouseConn.createStatement().executeQuery(query);
+                try (ResultSet rs = clickhouseConn.createStatement().executeQuery(query)) {
+                    if (!rs.next()) break;
 
-                if (!rs.next()) break;
+                    do {
+                        // Пишем поля строго по схеме
+                        csvWriter.write(String.join("~",
+                                quoteIfNotNull(rs.getLong("dwh_uid")),
+                                quoteIfNotNull(rs.getString("uid")),
+                                quoteIfNotNull(rs.getLong("listing_id")),
+                                quoteIfNotNull(rs.getString("listing_url")),
+                                quoteIfNotNull(rs.getInt("platform_id")),
+                                quoteIfNotNull(rs.getDouble("price")),
+                                quoteIfNotNull(rs.getDouble("price_per_sqm")),
+                                quoteIfNotNull(rs.getFloat("mortgage_rate")),
+                                quoteIfNotNull(rs.getDouble("monthly_payment")),
+                                quoteIfNotNull(rs.getDouble("advance_payment")),
+                                quoteIfNotNull(rs.getString("address")),
+                                quoteIfNotNull(rs.getLong("address_id")),
+                                quoteIfNotNull(rs.getDouble("area")),
+                                quoteIfNotNull(rs.getObject("rooms", Integer.class)),
+                                quoteIfNotNull(rs.getObject("floor", Integer.class)),
+                                quoteIfNotNull(rs.getString("description")),
+                                quoteIfNotNull(rs.getString("published_date")),
+                                quoteIfNotNull(rs.getString("updated_date")),
+                                quoteIfNotNull(rs.getString("created_at")),
+                                quoteIfNotNull(rs.getLong("seller_id")),
+                                quoteIfNotNull(rs.getString("seller_name_hash")),
+                                quoteIfNotNull(convertEnumValue(rs.getString("seller_type"))),
+                                quoteIfNotNull(rs.getString("company_name")),
+                                quoteIfNotNull(rs.getObject("company_id", Long.class)),
+                                quoteIfNotNull(convertEnumValue(rs.getString("property_type"))),
+                                quoteIfNotNull(convertEnumValue(rs.getString("category"))),
+                                quoteIfNotNull(rs.getObject("house_floors", Integer.class)),
+                                quoteIfNotNull(convertEnumValue(rs.getString("deal_type"))),
+                                quoteIfNotNull(convertEnumValue(rs.getString("discount_status"))),
+                                quoteIfNotNull(rs.getDouble("discount_value")),
+                                quoteIfNotNull(rs.getInt("placement_paid")),
+                                quoteIfNotNull(rs.getInt("big_card")),
+                                quoteIfNotNull(rs.getInt("pin_color")),
+                                quoteIfNotNull(rs.getDouble("longitude")),
+                                quoteIfNotNull(rs.getDouble("latitude")),
+                                quoteIfNotNull(convertArrayToPostgresFormat(rs.getArray("subway_distances"))),
+                                quoteIfNotNull(convertArrayToPostgresFormat(rs.getArray("subway_names"))),
+                                quoteIfNotNull(convertArrayToPostgresFormat(rs.getArray("photo_urls"))),
+                                quoteIfNotNull(rs.getObject("auction_status", Double.class)),
+                                quoteIfNotNull(convertEnumValue(rs.getString("flat_type"))),
+                                quoteIfNotNull(rs.getObject("height", Double.class)),
+                                quoteIfNotNull(rs.getObject("area_rooms", Double.class)),
+                                quoteIfNotNull(rs.getObject("previous_price", Double.class)),
+                                quoteIfNotNull(rs.getString("renovation_offer")),
+                                quoteIfNotNull(convertEnumValue(rs.getString("balcony_type"))),
+                                quoteIfNotNull(convertEnumValue(rs.getString("window_view"))),
+                                quoteIfNotNull(rs.getObject("built_year_offer", Integer.class)),
+                                quoteIfNotNull(convertEnumValue(rs.getString("building_state"))),
+                                quoteIfNotNull(rs.getInt("valid")),
+                                quoteIfNotNull(rs.getObject("predicted_price", Double.class)),
+                                quoteIfNotNull(rs.getObject("flat_rating", Double.class)),
+                                quoteIfNotNull(rs.getObject("house_rating", Double.class)),
+                                quoteIfNotNull(rs.getObject("location_rating", Double.class)),
+                                quoteIfNotNull(rs.getString("group_id"))
+                        ) + "\n");
 
-                do {
-                    String uid = rs.getString("uid");
-                    long listingId = rs.getLong("listing_id");
-                    int platformId = rs.getInt("platform_id");
-                    String listingUrl = rs.getString("listing_url");
-                    double price = rs.getDouble("price");
-                    double pricePerSqm = rs.getDouble("price_per_sqm");
-                    float mortgageRate = rs.getFloat("mortgage_rate");
-                    String address = rs.getString("address");
-                    long addressId = rs.getLong("address_id");
-                    float area = rs.getFloat("area");
-                    Integer rooms = rs.getObject("rooms", Integer.class);
-                    Integer floor = rs.getObject("floor", Integer.class);
-                    String description = rs.getString("description");
-                    String publishedDate = rs.getString("published_date");
-                    String updatedDate = rs.getString("updated_date");
-                    Long sellerId = rs.getObject("seller_id", Long.class);
-                    String sellerNameHash = rs.getString("seller_name_hash");
-                    String companyName = rs.getString("company_name");
-                    Long companyId = rs.getObject("company_id", Long.class);
-                    String propertyType = rs.getString("property_type");
-                    String category = rs.getString("category");
-                    Integer houseFloors = rs.getObject("house_floors", Integer.class);
-                    String dealType = rs.getString("deal_type");
-                    String discountStatus = rs.getString("discount_status");
-                    float discountValue = rs.getFloat("discount_value");
-                    int placementPaid = rs.getInt("placement_paid");
-                    int bigCard = rs.getInt("big_card");
-                    boolean pinColor = rs.getBoolean("pin_color");
-                    double latitude = rs.getDouble("latitude");
-                    double longitude = rs.getDouble("longitude");
-
-
-                    String subwayNames = convertArrayToPostgresFormat(rs.getArray("subway_names"));
-                    String subwayDistances = convertArrayToPostgresFormat(rs.getArray("subway_distances"));
-                    String photoUrls = convertArrayToPostgresFormat(rs.getArray("photo_urls"));
-
-                    double monthlyPayment = rs.getDouble("monthly_payment");
-                    double advancePayment = rs.getDouble("advance_payment");
-                    boolean auctionStatus = rs.getBoolean("auction_status");
-                    String createdAt = rs.getString("created_at");
-
-
-                    csvWriter.write(String.join("~",
-                            quoteIfNotNull(uid), quoteIfNotNull(listingId), quoteIfNotNull(platformId),
-                            quoteIfNotNull(listingUrl), quoteIfNotNull(price), quoteIfNotNull(pricePerSqm),
-                            quoteIfNotNull(mortgageRate), quoteIfNotNull(address), quoteIfNotNull(addressId),
-                            quoteIfNotNull(area), quoteIfNotNull(rooms), quoteIfNotNull(floor),
-                            quoteIfNotNull(description), quoteIfNotNull(publishedDate), quoteIfNotNull(updatedDate),
-                            quoteIfNotNull(sellerId), quoteIfNotNull(sellerNameHash), quoteIfNotNull(companyName),
-                            quoteIfNotNull(companyId), quoteIfNotNull(propertyType), quoteIfNotNull(category),
-                            quoteIfNotNull(houseFloors), quoteIfNotNull(dealType), quoteIfNotNull(discountStatus),
-                            quoteIfNotNull(discountValue), quoteIfNotNull(placementPaid), quoteIfNotNull(bigCard),
-                            quoteIfNotNull(pinColor), quoteIfNotNull(latitude), quoteIfNotNull(longitude),
-                            quoteIfNotNull(subwayNames), quoteIfNotNull(subwayDistances), quoteIfNotNull(photoUrls),
-                            quoteIfNotNull(monthlyPayment), quoteIfNotNull(advancePayment), quoteIfNotNull(auctionStatus),
-                            quoteIfNotNull(createdAt)
-                    ) + "\n");
-
-
-
-                } while (rs.next());
-
-                offset += batchSize;
+                        totalRecords++;
+                    } while (rs.next());
+                    offset += batchSize;
+                    System.out.printf("Processed batch: offset=%d, total=%d%n", offset, totalRecords);
+                }
             }
 
             csvWriter.close();
-            System.out.println("CSV файл создан: " + csvFilePath);
-
+            System.out.printf("CSV file created with %d records: %s%n", totalRecords, csvFilePath);
 
             try (Connection postgresConn = DriverManager.getConnection(POSTGRES_URL, POSTGRES_USER, POSTGRES_PASSWORD);
                  BufferedReader csvReader = new BufferedReader(new FileReader(csvFilePath))) {
 
-                String copyQuery = "COPY estate.listings FROM STDIN WITH (FORMAT csv, NULL '', DELIMITER '~', QUOTE '\"');";
+                String copyQuery = "COPY estate.property_listings FROM STDIN WITH (FORMAT csv, NULL '', DELIMITER '~', QUOTE '\"')";
                 CopyManager copyManager = new CopyManager((BaseConnection) postgresConn);
-                copyManager.copyIn(copyQuery, csvReader);
-                System.out.println("Data loaded into PostgreSQL.");
+                long copiedRows = copyManager.copyIn(copyQuery, csvReader);
+                System.out.printf("Successfully loaded %d records into PostgreSQL.%n", copiedRows);
             }
+        } catch (Exception e) {
+            System.err.println("Migration failed: " + e.getMessage());
+            throw e;
+        }
+    }
 
+    private void verifyTableStructure(Connection clickhouseConn) throws Exception {
+        try (ResultSet rs = clickhouseConn.createStatement().executeQuery("SELECT count() FROM " + CLICKHOUSE_TABLE + " LIMIT 1")) {
+            if (!rs.next()) {
+                throw new RuntimeException("Table " + CLICKHOUSE_TABLE + " doesn't exist or is empty");
+            }
+            System.out.println("Table " + CLICKHOUSE_TABLE + " exists and contains data");
         }
     }
 
@@ -140,40 +144,73 @@ public class MigrationService {
         return stringValue;
     }
 
-
     private String convertArrayToPostgresFormat(java.sql.Array array) throws Exception {
         if (array == null) return "{}";
-        Object elements = array.getArray();
+        Object rawArray = array.getArray();
 
-        if (elements instanceof Object[]) {
-            Object[] objArray = (Object[]) elements;
+        if (rawArray instanceof Object[] objArray) {
             if (objArray.length == 0) return "{}";
             StringBuilder sb = new StringBuilder("{");
-            for (Object element : objArray) {
-                sb.append("\"").append(element).append("\",");
+            for (Object el : objArray) {
+                sb.append("\"").append(el).append("\",");
             }
-            sb.deleteCharAt(sb.length() - 1).append("}");
+            sb.setLength(sb.length() - 1);
+            sb.append("}");
             return sb.toString();
-        } else if (elements instanceof float[]) {
-            float[] floatArray = (float[]) elements;
-            if (floatArray.length == 0) return "{}";
-            StringBuilder sb = new StringBuilder("{");
-            for (float element : floatArray) {
-                sb.append(element).append(",");
-            }
-            sb.deleteCharAt(sb.length() - 1).append("}");
-            return sb.toString();
-        } else if (elements instanceof double[]) {
-            double[] doubleArray = (double[]) elements;
+        } else if (rawArray instanceof double[] doubleArray) {
             if (doubleArray.length == 0) return "{}";
             StringBuilder sb = new StringBuilder("{");
-            for (double element : doubleArray) {
-                sb.append(element).append(",");
+            for (double el : doubleArray) {
+                sb.append(el).append(",");
             }
-            sb.deleteCharAt(sb.length() - 1).append("}");
+            sb.setLength(sb.length() - 1);
+            sb.append("}");
+            return sb.toString();
+        } else if (rawArray instanceof float[] floatArray) {
+            if (floatArray.length == 0) return "{}";
+            StringBuilder sb = new StringBuilder("{");
+            for (float el : floatArray) {
+                sb.append(el).append(",");
+            }
+            sb.setLength(sb.length() - 1);
+            sb.append("}");
             return sb.toString();
         } else {
-            throw new IllegalArgumentException("Unsupported array type: " + elements.getClass().getName());
+            throw new IllegalArgumentException("Unsupported array type: " + rawArray.getClass().getName());
         }
     }
+
+
+    private String convertEnumValue(String enumValue) {
+        if (enumValue == null) return null;
+
+        String cleaned = enumValue.replaceAll("=\\d+$", "").toUpperCase();
+
+        if ("category".equalsIgnoreCase(enumValue)) {
+            switch (cleaned) {
+                case "living":
+                    return "1";
+                case "Unknown":
+                    return "2";
+                default:
+                    return "2";
+            }
+        }
+
+        switch (cleaned) {
+            case "AGENT": case "AGENCY": case "DEVELOPER": case "OWNER": case "UNKNOWN": case "PRIVATE_AGENT":
+            case "LAYOUT": case "TOWNHOUSE": case "HOUSE": case "FLAT": case "ROOM":
+            case "LIVING":
+            case "SALE": case "LEASE": case "RENT":
+            case "ACTIVE": case "EXPIRED": case "NONE": case "DISCOUNT_RECEIVED":
+            case "SECONDARY": case "NEW_FLAT": case "NEW_SECONDARY":
+            case "BALCONY": case "LOGGIA": case "TWO_LOGGIA": case "BALCONY__LOGGIA": case "TWO_BALCONY":
+            case "YARD": case "YARD_STREET": case "STREET":
+            case "UNFINISHED": case "HAND_OVER":
+                return cleaned;
+            default:
+                return "UNKNOWN";
+        }
+    }
+
 }
